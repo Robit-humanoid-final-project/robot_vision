@@ -17,6 +17,17 @@ class Detector:
 
         self.model = self.core.read_model(model=model_path)
 
+        self.class_names = {
+            0: "Ball",
+            1: "Robot",
+            2: "L-Line",
+            3: "T-Line",
+            4: "X-Line",
+            5: "Goalpost",
+        }
+
+        self.conf_thresholds = {0: 0.57, 1: 0.65, 2: 0.35, 3: 0.50, 4: 0.45, 5: 0.99}
+
     def preprocess(self, img: np.ndarray):
         # 1. BGR -> Grayscale 변환
         gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
@@ -56,8 +67,10 @@ class Detector:
             x1, y1, x2, y2, conf, class_id = pred
 
             # 신뢰도(Confidence) 필터링
-            if conf > conf_threshold:
-                # 좌표가 0~1 사이 정규화 값으로 나오는 경우 해상도를 곱해줌
+            threshold = self.conf_thresholds.get(class_id, conf_threshold)
+
+            # 개별 신뢰도 조건 검사
+            if conf > threshold:
                 if x2 <= 1.0 and y2 <= 1.0:
                     x1 *= self.w
                     x2 *= self.w
