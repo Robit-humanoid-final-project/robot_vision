@@ -32,6 +32,7 @@ setup(
         "console_scripts": [
             # '실행할_명령어_이름 = 패키지명.파일명:실행함수' 형태
             "image_sub_node = robot_vision.image_sub_node:main",
+            "vision_observ_pub_node = robot_vision.vision_observ_pub_node:main",
         ],
     },
 )
