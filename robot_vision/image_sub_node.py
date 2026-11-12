@@ -1,3 +1,4 @@
+import concurrent.futures
 import os
 import time
 
@@ -9,8 +10,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
-# 분리된 추론 모듈 import
 from robot_vision.detector import Detector
+from robot_vision.hsv import HSV
 
 
 class ImageSubNode(Node):
@@ -29,29 +30,66 @@ class ImageSubNode(Node):
         model_path = self.get_parameter("model_path").value
         device_name = self.get_parameter("device_name").value
 
+        self.bridge = CvBridge()
         # OpenVINO 추론 model
         self.detector = Detector(model_path=model_path, device_name=device_name)
-        self.bridge = CvBridge()
+        # HSV
+        self.hsv = HSV()
+        # 병렬 처리
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
         self.subscription = self.create_subscription(
             Image, topic_name, self.image_callback, qos_profile_sensor_data
         )
 
+    def letterbox_resize(self, img, target_w=640, target_h=640):
+        orig_h, orig_w = img.shape[:2]
+        scale = min(target_w / orig_w, target_h / orig_h)
+        new_w, new_h = int(orig_w * scale), int(orig_h * scale)
+
+        resized = cv.resize(img, (new_w, new_h), interpolation=cv.INTER_LINEAR)
+        top = (target_h - new_h) // 2
+        bottom = target_h - new_h - top
+        left = (target_w - new_w) // 2
+        right = target_w - new_w - left
+
+        # padding
+        padded = cv.copyMakeBorder(
+            resized, top, bottom, left, right, cv.BORDER_CONSTANT, value=(0, 0, 0)
+        )
+        return padded
+
     def image_callback(self, msg):
         start_time = time.time()
-
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except CvBridgeError as e:
             self.get_logger().error(f"이미지 변환 실패: {e}")
             return
 
-        results, display_img = self.detector.predict(cv_image)
+        # resize, padding
+        padded_bgr = self.letterbox_resize(cv_image, self.detector.w, self.detector.h)
 
-        latency_ms = (time.time() - start_time) * 1000
+        # 병렬
+        future_yolo = self.thread_pool.submit(self.detector.predict, padded_bgr)
+        future_hsv = self.thread_pool.submit(self.hsv.process, padded_bgr)
+
+        # yolo_gray_img는 바운딩 박스가 쳐진 1채널 흑백 이미지(640x640)
+        results, yolo_gray_img = future_yolo.result()
+        mask, color_extracted = future_hsv.result()
+
+        # 흑백 이미지를 컬러(3채널) 캔버스로 확장
+        final_display = cv.cvtColor(yolo_gray_img, cv.COLOR_GRAY2BGR)
+
+        # mask 영역에 해당하는 픽셀만 color_extracted의 픽셀로 덮어씌움
+        cv.copyTo(color_extracted, mask, final_display)
+
+        time_diff = time.time() - start_time
+        latency_ms = time_diff * 1000
+        fps = 1.0 / time_diff if time_diff > 0 else 0.0
         cv.putText(
-            display_img,
-            f"Latency: {latency_ms:.1f}ms",
+            final_display,
+            f"Latency: {latency_ms:.1f}ms | FPS: {fps:.1f}",
             (10, 30),
             cv.FONT_HERSHEY_SIMPLEX,
             0.7,
@@ -59,7 +97,7 @@ class ImageSubNode(Node):
             2,
         )
 
-        cv.imshow("Robot Vision OpenVINO", display_img)
+        cv.imshow("Robot Vision (Fast Mode)", final_display)
         cv.waitKey(1)
 
 

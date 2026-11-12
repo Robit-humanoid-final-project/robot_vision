@@ -28,30 +28,15 @@ class Detector:
 
         self.conf_thresholds = {0: 0.57, 1: 0.65, 2: 0.35, 3: 0.50, 4: 0.45, 5: 0.99}
 
-    def preprocess(self, img: np.ndarray):
-        # 1. BGR -> Grayscale 변환
-        gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+    def preprocess(self, padded_bgr: np.ndarray):
+        # 그레이스케일
+        gray = cv.cvtColor(padded_bgr, cv.COLOR_BGR2GRAY)
 
-        # 2. 비율 유지 Letterbox 패딩 (640x640)
-        orig_h, orig_w = gray.shape
-        scale = min(self.w / orig_w, self.h / orig_h)
-        new_w, new_h = int(orig_w * scale), int(orig_h * scale)
-
-        resized = cv.resize(gray, (new_w, new_h), interpolation=cv.INTER_LINEAR)
-
-        top = (self.h - new_h) // 2
-        bottom = self.h - new_h - top
-        left = (self.w - new_w) // 2
-        right = self.w - new_w - left
-
-        padded_img = cv.copyMakeBorder(
-            resized, top, bottom, left, right, cv.BORDER_CONSTANT, value=0
-        )
-
-        # 3. NCHW 변환 (1, 1, 640, 640)
-        expanded_img = np.expand_dims(padded_img, axis=-1)
+        # NCHW 변환 (1, 1, 640, 640)
+        expanded_img = np.expand_dims(gray, axis=-1)
         tensor = expanded_img.transpose(2, 0, 1).astype(np.float32) / 255.0
-        return np.expand_dims(tensor, axis=0), padded_img
+
+        return np.expand_dims(tensor, axis=0), gray
 
     def postprocess(
         self, results: np.ndarray, display_img: np.ndarray, conf_threshold=0.3
