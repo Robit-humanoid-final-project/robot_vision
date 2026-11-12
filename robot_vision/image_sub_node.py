@@ -1,5 +1,5 @@
-import concurrent.futures
 import os
+import threading
 import time
 
 import cv2 as cv
@@ -7,7 +7,7 @@ import rclpy
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge, CvBridgeError
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSHistoryPolicy, QoSProfile
 from sensor_msgs.msg import Image
 
 from robot_vision.detector import Detector
@@ -35,11 +35,22 @@ class ImageSubNode(Node):
         self.detector = Detector(model_path=model_path, device_name=device_name)
         # HSV
         self.hsv = HSV()
-        # 병렬 처리
-        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-
+        # worker 구조 (연산 중일 때 프레임 드랍, 실시간성 유지)
+        self.latest_frame = None
+        self.frame_lock = threading.Lock()  # mutex
+        self.frame_event = threading.Event()
+        self.stop_event = threading.Event()
+        self.worker_thread = threading.Thread(
+            target=self.process_latest_frame, daemon=True
+        )
+        self.worker_thread.start()
+        # QoS profile keep last, depth 1
+        camera_qos = QoSProfile(
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         self.subscription = self.create_subscription(
-            Image, topic_name, self.image_callback, qos_profile_sensor_data
+            Image, topic_name, self.image_callback, camera_qos
         )
 
     def letterbox_resize(self, img, target_w=640, target_h=640):
@@ -60,45 +71,47 @@ class ImageSubNode(Node):
         return padded
 
     def image_callback(self, msg):
-        start_time = time.time()
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except CvBridgeError as e:
             self.get_logger().error(f"이미지 변환 실패: {e}")
             return
 
-        # resize, padding
-        padded_bgr = self.letterbox_resize(cv_image, self.detector.w, self.detector.h)
+        with self.frame_lock:
+            self.latest_frame = cv_image
+        self.frame_event.set()
 
-        # 병렬
-        future_yolo = self.thread_pool.submit(self.detector.predict, padded_bgr)
-        future_hsv = self.thread_pool.submit(self.hsv.process, padded_bgr)
+    def process_latest_frame(self):
+        while not self.stop_event.is_set():
+            if not self.frame_event.wait(timeout=0.1):
+                continue
 
-        # yolo_gray_img는 바운딩 박스가 쳐진 1채널 흑백 이미지(640x640)
-        results, yolo_gray_img = future_yolo.result()
-        mask, color_extracted = future_hsv.result()
+            with self.frame_lock:
+                cv_image = self.latest_frame
+                self.latest_frame = None
+                self.frame_event.clear()
 
-        # 흑백 이미지를 컬러(3채널) 캔버스로 확장
-        final_display = cv.cvtColor(yolo_gray_img, cv.COLOR_GRAY2BGR)
+            if cv_image is None:
+                continue
 
-        # mask 영역에 해당하는 픽셀만 color_extracted의 픽셀로 덮어씌움
-        cv.copyTo(color_extracted, mask, final_display)
+            start_time = time.perf_counter()
 
-        time_diff = time.time() - start_time
-        latency_ms = time_diff * 1000
-        fps = 1.0 / time_diff if time_diff > 0 else 0.0
-        cv.putText(
-            final_display,
-            f"Latency: {latency_ms:.1f}ms | FPS: {fps:.1f}",
-            (10, 30),
-            cv.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2,
-        )
+            processed_bgr = self.letterbox_resize(
+                cv_image, self.detector.w, self.detector.h
+            )
+            _, yolo_gray_img = self.detector.predict(processed_bgr)
+            mask, color_extracted = self.hsv.process(processed_bgr)
 
-        cv.imshow("Robot Vision (Fast Mode)", final_display)
-        cv.waitKey(1)
+            final_display = cv.cvtColor(yolo_gray_img, cv.COLOR_GRAY2BGR)
+            cv.copyTo(color_extracted, mask, final_display)
+
+            cv.imshow("Robot Vision", final_display)
+            cv.waitKey(1)
+
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            fps = 1000 / latency_ms if latency_ms > 0 else 0.0
+
+            print(f"total={latency_ms:.1f}ms, fps={fps:.1f}")
 
 
 def main(args=None):
@@ -109,6 +122,9 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        node.stop_event.set()
+        node.frame_event.set()
+        node.worker_thread.join(timeout=2.0)
         cv.destroyAllWindows()
         node.destroy_node()
         rclpy.shutdown()
