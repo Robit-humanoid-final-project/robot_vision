@@ -37,6 +37,7 @@ class ImageSubNode(Node):
         self.hsv = HSV()
         # worker 구조 (연산 중일 때 프레임 드랍, 실시간성 유지)
         self.latest_frame = None
+        self.latest_display = None
         self.frame_lock = threading.Lock()  # mutex
         self.frame_event = threading.Event()
         self.stop_event = threading.Event()
@@ -52,6 +53,7 @@ class ImageSubNode(Node):
         self.subscription = self.create_subscription(
             Image, topic_name, self.image_callback, camera_qos
         )
+        self.timer = self.create_timer(1 / 30, self.display_timer_callback)
 
     def letterbox_resize(self, img, target_w=640, target_h=640):
         orig_h, orig_w = img.shape[:2]
@@ -100,18 +102,39 @@ class ImageSubNode(Node):
                 cv_image, self.detector.w, self.detector.h
             )
             _, yolo_gray_img = self.detector.predict(processed_bgr)
-            mask, color_extracted = self.hsv.process(processed_bgr)
+            mask, bboxes = self.hsv.process(processed_bgr)
 
             final_display = cv.cvtColor(yolo_gray_img, cv.COLOR_GRAY2BGR)
-            cv.copyTo(color_extracted, mask, final_display)
+            cv.copyTo(processed_bgr, mask, final_display)
 
-            cv.imshow("Robot Vision", final_display)
-            cv.waitKey(1)
+            for x, y, w, h, obs_id in bboxes:
+                cv.rectangle(final_display, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                cv.putText(
+                    final_display,
+                    f"Obstacle:{obs_id}",
+                    (x, y - 5),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    2,
+                )
+
+            with self.frame_lock:
+                self.latest_display = final_display
 
             latency_ms = (time.perf_counter() - start_time) * 1000
             fps = 1000 / latency_ms if latency_ms > 0 else 0.0
 
             print(f"total={latency_ms:.1f}ms, fps={fps:.1f}")
+
+    def display_timer_callback(self):
+        with self.frame_lock:
+            display_img = self.latest_display
+            self.latest_display = None
+
+        if display_img is not None:
+            cv.imshow("Robot Vision", display_img)
+            cv.waitKey(1)
 
 
 def main(args=None):
