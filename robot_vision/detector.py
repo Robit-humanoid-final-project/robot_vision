@@ -54,7 +54,7 @@ class Detector:
 
         self.detections = []
         self.intersections = []
-        analysis_img = cv.cvtColor(display_img, cv.COLOR_BGR2GRAY)
+        analysis_img = display_img
 
         for pred in predictions:
             x1, y1, x2, y2, conf, class_id = pred
