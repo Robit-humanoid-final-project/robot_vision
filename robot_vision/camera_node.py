@@ -46,6 +46,8 @@ class CameraNode(Node):
         self.cy = k[5]
         self.h = self.get_parameter("camera_height").value
         self.mount_tilt_deg = self.get_parameter("mount_tilt_deg").value
+        self.letterbox_scale = 1.0
+        self.letterbox_pad = (0, 0)
         self.theta = math.radians(
             self.get_parameter("camera_tilt_deg").value + self.mount_tilt_deg
         )
@@ -103,6 +105,11 @@ class CameraNode(Node):
             u = ((x1 + x2) / 2.0) + offset_x
             v = float(y2) + offset_y
 
+        # 640x480 좌표
+        pad_x, pad_y = self.letterbox_pad
+        u = (u - pad_x) / self.letterbox_scale
+        v = (v - pad_y) / self.letterbox_scale
+
         # 정규화 좌표(y_n) 및 수직 각도 계산
         y_n = (v - self.cy) / self.fy
         alpha = math.atan(y_n)
@@ -127,6 +134,8 @@ class CameraNode(Node):
         bottom = target_h - new_h - top
         left = (target_w - new_w) // 2
         right = target_w - new_w - left
+        self.letterbox_scale = scale
+        self.letterbox_pad = (left, top)
 
         # padding
         padded = cv.copyMakeBorder(
@@ -139,11 +148,19 @@ class CameraNode(Node):
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except CvBridgeError as e:
             self.get_logger().error(f"이미지 변환 실패: {e}")
+            self.publish_status(2)
             return
 
         with self.frame_lock:
             self.latest_frame = cv_image
         self.frame_event.set()
+
+    def publish_status(self, status):
+        message = Vision2LocalObserv()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = "camera"
+        message.status = status
+        self.vision_pub.publish(message)
 
     def process_latest_frame(self):
         while not self.stop_event.is_set():
@@ -160,12 +177,17 @@ class CameraNode(Node):
 
             start_time = time.perf_counter()
 
-            processed_bgr = self.letterbox_resize(
-                cv_image, self.detector.w, self.detector.h
-            )
-            _, yolo_gray_img = self.detector.predict(processed_bgr)
-            mask, bboxes = self.hsv.process(processed_bgr)
-            self.publish_vision_observation(bboxes)
+            try:
+                processed_bgr = self.letterbox_resize(
+                    cv_image, self.detector.w, self.detector.h
+                )
+                _, yolo_gray_img = self.detector.predict(processed_bgr)
+                mask, bboxes = self.hsv.process(processed_bgr)
+                self.publish_vision_observation(bboxes)
+            except (cv.error, RuntimeError, ValueError, TypeError, IndexError) as error:
+                self.get_logger().error(f"비전 처리 실패: {error}")
+                self.publish_status(3)
+                continue
 
             final_display = cv.cvtColor(yolo_gray_img, cv.COLOR_GRAY2BGR)
             cv.copyTo(processed_bgr, mask, final_display)
@@ -196,6 +218,7 @@ class CameraNode(Node):
         message.header.frame_id = "camera"
         message.status = 0
 
+        position_error = False
         detection_id = 0
         for detection in self.detector.detections:
             class_id = detection["class_id"]
@@ -206,13 +229,16 @@ class CameraNode(Node):
                 distance = self.compute_distance(bbox=detection["bbox"])
                 if distance[0] is not None:
                     message.ball = [float(distance[0]), float(distance[1]), confidence]
-                    print(
-                        f"Ball: x={distance[0]:.3f} m, "
-                        f"y={distance[1]:.3f} m, confidence={confidence:.3f}"
-                    )
+                    # print(
+                    #     f"Ball: x={distance[0]:.3f} m, "
+                    #     f"y={distance[1]:.3f} m, confidence={confidence:.3f}"
+                    # )
+                else:
+                    position_error = True
             elif class_id == 5:
                 distance = self.compute_distance(bbox=detection["bbox"])
                 if distance[0] is None:
+                    position_error = True
                     continue
                 detection_message = VisionDetection()
                 detection_message.type = 3
@@ -221,14 +247,15 @@ class CameraNode(Node):
                 detection_message.y = float(distance[1])
                 detection_message.confidence = confidence
                 message.detections.append(detection_message)
-                print(
-                    f"Goalpost: x={distance[0]:.3f} m, "
-                    f"y={distance[1]:.3f} m, confidence={confidence:.3f}"
-                )
+                # print(
+                #     f"Goalpost: x={distance[0]:.3f} m, "
+                #     f"y={distance[1]:.3f} m, confidence={confidence:.3f}"
+                # )
 
         for intersection in self.detector.intersections:
             distance = self.compute_distance(point=intersection["point"])
             if distance[0] is None:
+                position_error = True
                 continue
             detection_id += 1
             detection_message = VisionDetection()
@@ -238,15 +265,16 @@ class CameraNode(Node):
             detection_message.y = float(distance[1])
             detection_message.confidence = intersection["confidence"]
             message.detections.append(detection_message)
-            print(
-                f"Line type={detection_message.type}: "
-                f"x={distance[0]:.3f} m, y={distance[1]:.3f} m, "
-                f"confidence={intersection['confidence']:.3f}"
-            )
+            # print(
+            #     f"Line type={detection_message.type}: "
+            #     f"x={distance[0]:.3f} m, y={distance[1]:.3f} m, "
+            #     f"confidence={intersection['confidence']:.3f}"
+            # )
 
         for x, y, width, height, obstacle_id in obstacle_bboxes:
             distance = self.compute_distance(bbox=(x, y, x + width, y + height))
             if distance[0] is None:
+                position_error = True
                 continue
             obstacle = VisionObstacle()
             obstacle.detection_id = obstacle_id
@@ -254,12 +282,14 @@ class CameraNode(Node):
             obstacle.y = float(distance[1])
             obstacle.confidence = 1.0
             message.obstacles.append(obstacle)
-            print(
-                f"Obstacle id={obstacle_id}: x={distance[0]:.3f} m, "
-                f"y={distance[1]:.3f} m"
-            )
+            # print(
+            #     f"Obstacle id={obstacle_id}: x={distance[0]:.3f} m, "
+            #     f"y={distance[1]:.3f} m"
+            # )
 
-        if not message.detections and not any(message.ball) and not message.obstacles:
+        if position_error:
+            message.status = 4
+        elif not message.detections and not any(message.ball) and not message.obstacles:
             message.status = 1
         self.vision_pub.publish(message)
 
