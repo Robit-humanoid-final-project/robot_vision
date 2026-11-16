@@ -29,6 +29,7 @@ class Detector:
         }
 
         self.conf_thresholds = {0: 0.57, 1: 0.65, 2: 0.35, 3: 0.50, 4: 0.45, 5: 0.99}
+        self.detections = []
         self.intersections = []
 
     def preprocess(self, padded_bgr: np.ndarray):
@@ -51,6 +52,7 @@ class Detector:
         # Batch 차원을 제거하여 (300, 6) 배열로 만듦
         predictions = results[0]
 
+        self.detections = []
         self.intersections = []
         analysis_img = cv.cvtColor(display_img, cv.COLOR_BGR2GRAY)
 
@@ -86,10 +88,19 @@ class Detector:
                             {
                                 "class_id": class_id,
                                 "point": point,
+                                "confidence": float(conf),
                             }
                         )
                         cv.circle(display_img, point, 6, (0, 0, 0), -1)
                         cv.circle(display_img, point, 3, (255, 255, 255), -1)
+                else:
+                    self.detections.append(
+                        {
+                            "class_id": class_id,
+                            "bbox": (x1, y1, x2, y2),
+                            "confidence": float(conf),
+                        }
+                    )
 
                 # 바운딩 박스
                 cv.rectangle(display_img, (x1, y1), (x2, y2), (255, 255, 255), 2)
