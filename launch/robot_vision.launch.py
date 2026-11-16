@@ -12,11 +12,11 @@ def generate_launch_description():
         [
             Node(
                 package="robot_vision",
-                executable="image_sub_node",
-                name="image_sub_node",
+                executable="camera_node",
+                name="camera_node",
                 output="screen",
                 emulate_tty=True,
                 parameters=[camera_info_yaml_file_path],
-            )
+            ),
         ]
     )
