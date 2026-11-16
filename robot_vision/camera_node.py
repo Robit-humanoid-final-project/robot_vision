@@ -117,10 +117,6 @@ class CameraNode(Node):
 
         return distance_x, distance_y
 
-        # 사용 예시:
-        # self.compute_distance(bbox=(260, 180, 340, 310))
-        # self.compute_distance(point=(320, 280))
-
     def letterbox_resize(self, img, target_w=640, target_h=640):
         orig_h, orig_w = img.shape[:2]
         scale = min(target_w / orig_w, target_h / orig_h)
