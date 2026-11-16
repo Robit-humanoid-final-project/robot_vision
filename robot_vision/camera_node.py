@@ -7,11 +7,11 @@ import cv2 as cv
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge, CvBridgeError
-from humanoid_interfaces.msg import Vision2LocalObserv, VisionDetection, VisionObstacle
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile
 from sensor_msgs.msg import Image
 
+from humanoid_interfaces.msg import Vision2LocalObserv, VisionDetection, VisionObstacle
 from insta360_usb_cam.msg import PanTiltStatusMsgs
 from robot_vision.detector import Detector
 from robot_vision.hsv import HSV
@@ -80,7 +80,7 @@ class CameraNode(Node):
             camera_qos,
         )
         self.vision_pub = self.create_publisher(
-            Vision2LocalObserv, "/vision2local_observ", 10
+            Vision2LocalObserv, "/vision_packages", 10
         )
         self.timer = self.create_timer(1 / 30, self.display_timer_callback)
 
