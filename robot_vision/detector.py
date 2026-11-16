@@ -2,6 +2,8 @@ import cv2 as cv
 import numpy as np
 from openvino import Core
 
+from robot_vision.line_intersection import FindIntersection
+
 
 class Detector:
     def __init__(self, model_path: str, device_name: str = "AUTO"):
@@ -27,6 +29,7 @@ class Detector:
         }
 
         self.conf_thresholds = {0: 0.57, 1: 0.65, 2: 0.35, 3: 0.50, 4: 0.45, 5: 0.99}
+        self.intersections = []
 
     def preprocess(self, padded_bgr: np.ndarray):
         # 그레이스케일
@@ -48,6 +51,9 @@ class Detector:
         # Batch 차원을 제거하여 (300, 6) 배열로 만듦
         predictions = results[0]
 
+        self.intersections = []
+        analysis_img = cv.cvtColor(display_img, cv.COLOR_BGR2GRAY)
+
         for pred in predictions:
             x1, y1, x2, y2, conf, class_id = pred
 
@@ -62,14 +68,32 @@ class Detector:
                     y1 *= self.h
                     y2 *= self.h
 
-                # 정수형으로 변환 (OpenCV 픽셀 좌표계)
                 x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
                 class_id = int(class_id)
+                x1 = max(0, min(x1, display_img.shape[1] - 1))
+                y1 = max(0, min(y1, display_img.shape[0] - 1))
+                x2 = max(0, min(x2, display_img.shape[1]))
+                y2 = max(0, min(y2, display_img.shape[0]))
+                if x2 <= x1 or y2 <= y1:  # 박스 유효성 검사
+                    continue
 
-                # 바운딩 박스 그리기
+                if class_id in (2, 3, 4):  # L, T, X 인식한 경우 해당 부분 교차점 분석
+                    intersection = FindIntersection(analysis_img, (x1, y1, x2, y2))
+                    if intersection is not None:
+                        local_x, local_y = intersection
+                        point = (x1 + local_x, y1 + local_y)
+                        self.intersections.append(
+                            {
+                                "class_id": class_id,
+                                "point": point,
+                            }
+                        )
+                        cv.circle(display_img, point, 6, (0, 0, 0), -1)
+                        cv.circle(display_img, point, 3, (255, 255, 255), -1)
+
+                # 바운딩 박스
                 cv.rectangle(display_img, (x1, y1), (x2, y2), (255, 255, 255), 2)
 
-                # 클래스 ID와 확률 텍스트 그리기
                 label = f"ID:{class_id} ({conf:.2f})"
                 cv.putText(
                     display_img,
