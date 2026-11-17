@@ -4,6 +4,7 @@ import threading
 import time
 
 import cv2 as cv
+import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge, CvBridgeError
@@ -34,7 +35,8 @@ class CameraNode(Node):
 
         # 거리 계산
         self.declare_parameter("camera_matrix.data", [0.0] * 9)
-        self.declare_parameter("camera_height", 0.7)  # m
+        self.declare_parameter("distortion_coefficients.data", [0.0] * 5)
+        self.declare_parameter("camera_height", 0.58)  # m
         self.declare_parameter("camera_tilt_deg", 0.0)
         self.declare_parameter("mount_tilt_deg", 0.0)
         self.declare_parameter("ball.width", 0.130)
@@ -42,10 +44,13 @@ class CameraNode(Node):
         self.declare_parameter("cone.width", 0.140)
         self.declare_parameter("cone.height", 0.225)  # //
         k = self.get_parameter("camera_matrix.data").value
+        d = self.get_parameter("distortion_coefficients.data").value
         self.fx = k[0]
         self.cx = k[2]
         self.fy = k[4]
         self.cy = k[5]
+        self.K = np.array(k, dtype=np.float64).reshape(3, 3)
+        self.D = np.array(d, dtype=np.float64)
         self.h = self.get_parameter("camera_height").value
         self.mount_tilt_deg = self.get_parameter("mount_tilt_deg").value
         self.ball_width = self.get_parameter("ball.width").value
@@ -124,7 +129,49 @@ class CameraNode(Node):
         message.status = status
         self.vision_pub.publish(message)
 
-    def compute_distance(self, bbox=None, point=None, roi_offset=(0, 0)):
+    def _undistort_points(self, points):
+        pts = np.array(points, dtype=np.float64).reshape(-1, 1, 2)
+        undist = cv.undistortPoints(pts, self.K, self.D, P=self.K)
+        return undist.reshape(-1, 2)
+
+    def compute_distance_A(self, bbox, width, height=None, roi_offset=(0, 0)):
+        x1, y1, x2, y2 = bbox
+        offset_x, offset_y = roi_offset
+        pad_x, pad_y = self.letterbox_pad
+
+        x1_orig = (x1 + offset_x - pad_x) / self.letterbox_scale
+        y1_orig = (y1 + offset_y - pad_y) / self.letterbox_scale
+        x2_orig = (x2 + offset_x - pad_x) / self.letterbox_scale
+        y2_orig = (y2 + offset_y - pad_y) / self.letterbox_scale
+
+        (ux1, uy1), (ux2, uy2) = self._undistort_points(
+            [(x1_orig, y1_orig), (x2_orig, y2_orig)]
+        )
+        u = (ux1 + ux2) / 2.0
+        v = (uy1 + uy2) / 2.0
+        w_orig = ux2 - ux1
+        h_orig = uy2 - uy1
+
+        if w_orig <= 1e-6 or (height is not None and h_orig <= 1e-6):
+            return None, None
+
+        z_x = (self.fx * width) / w_orig
+        if height is not None:
+            z_y = (self.fy * height) / h_orig
+            z_cam = 0.5 * (z_x + z_y)
+        else:
+            z_cam = z_x
+
+        y_n = (v - self.cy) / self.fy
+        alpha = math.atan(y_n)
+        total_angle = self.theta + alpha
+
+        distance_x = z_cam * (math.cos(total_angle) / math.cos(alpha))
+        distance_y = z_cam * ((self.cx - u) / self.fx)
+
+        return distance_x, distance_y
+
+    def compute_distance_B(self, bbox=None, point=None, roi_offset=(0, 0)):
         if (bbox is None) == (point is None):
             raise ValueError()
 
@@ -143,6 +190,8 @@ class CameraNode(Node):
         pad_x, pad_y = self.letterbox_pad
         u = (u - pad_x) / self.letterbox_scale
         v = (v - pad_y) / self.letterbox_scale
+
+        (u, v) = self._undistort_points([(u, v)])[0]
 
         # 정규화 좌표(y_n) 및 수직 각도 계산
         y_n = (v - self.cy) / self.fy
@@ -225,7 +274,7 @@ class CameraNode(Node):
             latency_ms = (time.perf_counter() - start_time) * 1000
             fps = 1000 / latency_ms if latency_ms > 0 else 0.0
 
-            print(f"total={latency_ms:.1f}ms, fps={fps:.1f}")
+            # print(f"total={latency_ms:.1f}ms, fps={fps:.1f}")
 
     def publish_vision_observation(self, obstacle_bboxes):
         message = Vision2LocalObserv()
@@ -241,13 +290,28 @@ class CameraNode(Node):
             detection_id += 1
 
             if class_id == 0:
-                distance = self.compute_distance(bbox=detection["bbox"])
-                if distance[0] is not None:
-                    message.ball = [float(distance[0]), float(distance[1]), confidence]
+                distance_a = self.compute_distance_A(  # test
+                    bbox=detection["bbox"],
+                    width=self.ball_width,
+                    height=self.ball_height,
+                )
+                distance_b = self.compute_distance_B(bbox=detection["bbox"])
+                if distance_a[0] and distance_b[0] is not None:
+                    message.ball = [
+                        float(distance_b[0]),
+                        float(distance_b[1]),
+                        confidence,
+                    ]
+                    print(
+                        f"Ball_A: x={distance_a[0]:.3f} m, "
+                        f"y={distance_a[1]:.3f} m, confidence={confidence:.3f}"
+                        f"Ball_B: x={distance_b[0]:.3f} m, "
+                        f"y={distance_b[1]:.3f} m, confidence={confidence:.3f}"
+                    )
                 else:
                     position_error = True
             elif class_id == 5:
-                distance = self.compute_distance(bbox=detection["bbox"])
+                distance = self.compute_distance_B(bbox=detection["bbox"])
                 if distance[0] is None:
                     position_error = True
                     continue
@@ -260,7 +324,7 @@ class CameraNode(Node):
                 message.detections.append(detection_message)
 
         for intersection in self.detector.intersections:
-            distance = self.compute_distance(point=intersection["point"])
+            distance = self.compute_distance_B(point=intersection["point"])
             if distance[0] is None:
                 position_error = True
                 continue
@@ -273,7 +337,7 @@ class CameraNode(Node):
             detection_message.confidence = intersection["confidence"]
 
         for x, y, width, height, obstacle_id in obstacle_bboxes:
-            distance = self.compute_distance(bbox=(x, y, x + width, y + height))
+            distance = self.compute_distance_B(bbox=(x, y, x + width, y + height))
             if distance[0] is None:
                 position_error = True
                 continue

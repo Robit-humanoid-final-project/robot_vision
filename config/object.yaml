@@ -7,3 +7,5 @@
     cone: # 꼬깔
       width: 0.140
       height: 0.225
+
+    camera_height: 0.58
