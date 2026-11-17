@@ -1,0 +1,9 @@
+/**:
+  ros__parameters:
+    ball:
+      width: 0.130
+      height: 0.130
+
+    cone: # 꼬깔
+      width: 0.140
+      height: 0.225

@@ -27,8 +27,7 @@ class CameraNode(Node):
 
         self.declare_parameter("topic_name", "camera1/camera/image_raw")
         self.declare_parameter("model_path", default_model_path)
-        self.declare_parameter("device_name", "AUTO")
-
+        self.declare_parameter("device_name", "AUTO")  # //
         topic_name = self.get_parameter("topic_name").value
         model_path = self.get_parameter("model_path").value
         device_name = self.get_parameter("device_name").value
@@ -38,7 +37,10 @@ class CameraNode(Node):
         self.declare_parameter("camera_height", 0.7)  # m
         self.declare_parameter("camera_tilt_deg", 0.0)
         self.declare_parameter("mount_tilt_deg", 0.0)
-
+        self.declare_parameter("ball.width", 0.130)
+        self.declare_parameter("ball.height", 0.130)
+        self.declare_parameter("cone.width", 0.140)
+        self.declare_parameter("cone.height", 0.225)  # //
         k = self.get_parameter("camera_matrix.data").value
         self.fx = k[0]
         self.cx = k[2]
@@ -46,6 +48,10 @@ class CameraNode(Node):
         self.cy = k[5]
         self.h = self.get_parameter("camera_height").value
         self.mount_tilt_deg = self.get_parameter("mount_tilt_deg").value
+        self.ball_width = self.get_parameter("ball.width").value
+        self.ball_height = self.get_parameter("ball.height").value
+        self.cone_width = self.get_parameter("cone.width").value
+        self.cone_height = self.get_parameter("cone.height").value
         self.letterbox_scale = 1.0
         self.letterbox_pad = (0, 0)
         self.theta = math.radians(
