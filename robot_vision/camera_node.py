@@ -86,9 +86,37 @@ class CameraNode(Node):
         )
         self.timer = self.create_timer(1 / 30, self.display_timer_callback)
 
+    def image_callback(self, msg):
+        try:
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+        except CvBridgeError as e:
+            self.get_logger().error(f"이미지 변환 실패: {e}")
+            self.publish_status(2)
+            return
+
+        with self.frame_lock:
+            self.latest_frame = cv_image
+        self.frame_event.set()
+
     def pan_tilt_callback(self, msg: PanTiltStatusMsgs):
         tilt_deg = msg.tilt / 3600.0
         self.theta = math.radians(-tilt_deg + self.mount_tilt_deg)
+
+    def display_timer_callback(self):
+        with self.frame_lock:
+            display_img = self.latest_display
+            self.latest_display = None
+
+        if display_img is not None:
+            cv.imshow("Robot Vision", display_img)
+            cv.waitKey(1)
+
+    def publish_status(self, status):
+        message = Vision2LocalObserv()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = "camera"
+        message.status = status
+        self.vision_pub.publish(message)
 
     def compute_distance(self, bbox=None, point=None, roi_offset=(0, 0)):
         if (bbox is None) == (point is None):
@@ -142,25 +170,6 @@ class CameraNode(Node):
             resized, top, bottom, left, right, cv.BORDER_CONSTANT, value=(0, 0, 0)
         )
         return padded
-
-    def image_callback(self, msg):
-        try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        except CvBridgeError as e:
-            self.get_logger().error(f"이미지 변환 실패: {e}")
-            self.publish_status(2)
-            return
-
-        with self.frame_lock:
-            self.latest_frame = cv_image
-        self.frame_event.set()
-
-    def publish_status(self, status):
-        message = Vision2LocalObserv()
-        message.header.stamp = self.get_clock().now().to_msg()
-        message.header.frame_id = "camera"
-        message.status = status
-        self.vision_pub.publish(message)
 
     def process_latest_frame(self):
         while not self.stop_event.is_set():
@@ -229,10 +238,6 @@ class CameraNode(Node):
                 distance = self.compute_distance(bbox=detection["bbox"])
                 if distance[0] is not None:
                     message.ball = [float(distance[0]), float(distance[1]), confidence]
-                    # print(
-                    #     f"Ball: x={distance[0]:.3f} m, "
-                    #     f"y={distance[1]:.3f} m, confidence={confidence:.3f}"
-                    # )
                 else:
                     position_error = True
             elif class_id == 5:
@@ -247,10 +252,6 @@ class CameraNode(Node):
                 detection_message.y = float(distance[1])
                 detection_message.confidence = confidence
                 message.detections.append(detection_message)
-                # print(
-                #     f"Goalpost: x={distance[0]:.3f} m, "
-                #     f"y={distance[1]:.3f} m, confidence={confidence:.3f}"
-                # )
 
         for intersection in self.detector.intersections:
             distance = self.compute_distance(point=intersection["point"])
@@ -264,12 +265,6 @@ class CameraNode(Node):
             detection_message.x = float(distance[0])
             detection_message.y = float(distance[1])
             detection_message.confidence = intersection["confidence"]
-            message.detections.append(detection_message)
-            # print(
-            #     f"Line type={detection_message.type}: "
-            #     f"x={distance[0]:.3f} m, y={distance[1]:.3f} m, "
-            #     f"confidence={intersection['confidence']:.3f}"
-            # )
 
         for x, y, width, height, obstacle_id in obstacle_bboxes:
             distance = self.compute_distance(bbox=(x, y, x + width, y + height))
@@ -282,25 +277,13 @@ class CameraNode(Node):
             obstacle.y = float(distance[1])
             obstacle.confidence = 1.0
             message.obstacles.append(obstacle)
-            # print(
-            #     f"Obstacle id={obstacle_id}: x={distance[0]:.3f} m, "
-            #     f"y={distance[1]:.3f} m"
-            # )
 
         if position_error:
             message.status = 4
         elif not message.detections and not any(message.ball) and not message.obstacles:
             message.status = 1
         self.vision_pub.publish(message)
-
-    def display_timer_callback(self):
-        with self.frame_lock:
-            display_img = self.latest_display
-            self.latest_display = None
-
-        if display_img is not None:
-            cv.imshow("Robot Vision", display_img)
-            cv.waitKey(1)
+        # ros2 topic echo /vision_packages
 
 
 def main(args=None):
