@@ -79,10 +79,10 @@ class HSV:
                                 # 해당 파인 부분이 상단인지, 하단인지
                                 top_defects = [
                                     pt for pt in valid_defects if pt[1] < y + h // 2
-                                ]
+                                ] 
                                 bottom_defects = [
                                     pt for pt in valid_defects if pt[1] >= y + h // 2
-                                ]
+                                ] 
 
                                 if top_defects:
                                     # 너비 기준 중앙에서 가까운 f를 찾음
@@ -137,14 +137,14 @@ class HSV:
             aspect_ratio = w / float(h)
 
             # 가로세로 꼬깔 비율인지
-            if 0.3 <= aspect_ratio <= 0.7:
+            if 0.3 <= aspect_ratio <= 0.8:
                 area = cv.contourArea(c)
 
                 # 꼭짓점 개수 검사, 노이즈 잡힌 경우 꼭짓점 다수
                 if area >= 150:
                     epsilon = 0.05 * cv.arcLength(c, True)
                     approx = cv.approxPolyDP(c, epsilon, True)
-                    if len(approx) > 7:
+                    if len(approx) > 8:
                         continue
 
                 bboxes.append((x, y, w, h, obs_id))

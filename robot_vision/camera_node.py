@@ -111,7 +111,7 @@ class CameraNode(Node):
 
     def pan_tilt_callback(self, msg: PanTiltStatusMsgs):
         tilt_deg = msg.tilt / 3600.0
-        self.theta = math.radians(-tilt_deg + self.mount_tilt_deg)
+        self.theta = math.radians(tilt_deg + self.mount_tilt_deg)
 
     def display_timer_callback(self):
         with self.frame_lock:
@@ -353,6 +353,7 @@ class CameraNode(Node):
 
         if position_error:
             message.status = 4
+        # ros2 topic echo /vision_packages
         elif not message.detections and not any(message.ball) and not message.obstacles:
             message.status = 1
         self.vision_pub.publish(message)
@@ -377,3 +378,4 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
+0
