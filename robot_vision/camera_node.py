@@ -290,24 +290,21 @@ class CameraNode(Node):
             detection_id += 1
 
             if class_id == 0:
-                distance_a = self.compute_distance_A(  # test
+                distance_a = self.compute_distance_A(
                     bbox=detection["bbox"],
                     width=self.ball_width,
-                    height=self.ball_height,
+                    # height=self.ball_height,
                 )
-                distance_b = self.compute_distance_B(bbox=detection["bbox"])
-                if distance_a[0] and distance_b[0] is not None:
+                if distance_a[0] is not None:
                     message.ball = [
-                        float(distance_b[0]),
-                        float(distance_b[1]),
+                        float(distance_a[0]),
+                        float(distance_a[1]),
                         confidence,
                     ]
-                    print(
-                        f"Ball_A: x={distance_a[0]:.3f} m, "
-                        f"y={distance_a[1]:.3f} m, confidence={confidence:.3f}"
-                        f"Ball_B: x={distance_b[0]:.3f} m, "
-                        f"y={distance_b[1]:.3f} m, confidence={confidence:.3f}"
-                    )
+                    # print(
+                    #     f"Ball_A: x={distance_a[0]:.3f} m, "
+                    #     f"y={distance_a[1]:.3f} m, confidence={confidence:.3f}"
+                    # )
                 else:
                     position_error = True
             elif class_id == 5:
