@@ -171,6 +171,7 @@ class CameraNode(Node):
 
         return distance_x, distance_y
 
+    # TODO: B 방법 오차 이유 찾기
     def compute_distance_B(self, bbox=None, point=None, roi_offset=(0, 0)):
         if (bbox is None) == (point is None):
             raise ValueError()
@@ -332,9 +333,14 @@ class CameraNode(Node):
             detection_message.x = float(distance[0])
             detection_message.y = float(distance[1])
             detection_message.confidence = intersection["confidence"]
+            message.detections.append(detection_message)
 
         for x, y, width, height, obstacle_id in obstacle_bboxes:
-            distance = self.compute_distance_B(bbox=(x, y, x + width, y + height))
+            distance = self.compute_distance_A(
+                bbox=(x, y, x + width, y + height),
+                width=self.cone_width,
+                height=self.cone_height,
+            )
             if distance[0] is None:
                 position_error = True
                 continue
