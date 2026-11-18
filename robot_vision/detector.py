@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 from openvino import Core
 
-from robot_vision.line_intersection import FindIntersection
+# from robot_vision.line_intersection import FindIntersection
 
 
 class Detector:
@@ -54,7 +54,7 @@ class Detector:
 
         self.detections = []
         self.intersections = []
-        analysis_img = display_img
+        # analysis_img = display_img
 
         for pred in predictions:
             x1, y1, x2, y2, conf, class_id = pred
@@ -80,19 +80,22 @@ class Detector:
                     continue
 
                 if class_id in (2, 3, 4):  # L, T, X 인식한 경우 해당 부분 교차점 분석
-                    intersection = FindIntersection(analysis_img, (x1, y1, x2, y2))
-                    if intersection is not None:
-                        local_x, local_y = intersection
-                        point = (x1 + local_x, y1 + local_y)
-                        self.intersections.append(
-                            {
-                                "class_id": class_id,
-                                "point": point,
-                                "confidence": float(conf),
-                            }
-                        )
-                        cv.circle(display_img, point, 6, (0, 0, 0), -1)
-                        cv.circle(display_img, point, 3, (255, 255, 255), -1)
+                    # intersection = FindIntersection(
+                    #     analysis_img, (x1, y1, x2, y2)
+                    # )
+                    # if intersection is not None:
+                    #     local_x, local_y = intersection
+                    #     point = (x1 + local_x, y1 + local_y)
+                    point = ((x1 + x2) // 2, (y1 + y2) // 2)
+                    self.intersections.append(
+                        {
+                            "class_id": class_id,
+                            "point": point,
+                            "confidence": float(conf),
+                        }
+                    )
+                    cv.circle(display_img, point, 6, (0, 0, 0), -1)
+                    cv.circle(display_img, point, 3, (255, 255, 255), -1)
                 else:
                     self.detections.append(
                         {

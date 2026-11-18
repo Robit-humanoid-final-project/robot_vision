@@ -1,3 +1,5 @@
+# test: 사용 제외해보기
+
 import cv2 as cv
 import numpy as np
 
