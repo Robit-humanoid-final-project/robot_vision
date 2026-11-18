@@ -291,15 +291,15 @@ class CameraNode(Node):
             detection_id += 1
 
             if class_id == 0:
-                distance_a = self.compute_distance_A(
+                distance = self.compute_distance_A(
                     bbox=detection["bbox"],
                     width=self.ball_width,
                     # height=self.ball_height,
                 )
-                if distance_a[0] is not None:
+                if distance[0] is not None:
                     message.ball = [
-                        float(distance_a[0]),
-                        float(distance_a[1]),
+                        float(distance[0]),
+                        float(distance[1]),
                         confidence,
                     ]
                     # print(
