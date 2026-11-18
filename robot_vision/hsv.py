@@ -9,7 +9,7 @@ def nothing(x):
 class HSV:
     def __init__(self, debug_mode=False):
         self.debug_mode = debug_mode
-        self.lower_bound = np.array([2, 110, 150])
+        self.lower_bound = np.array([2, 160, 150])
         self.upper_bound = np.array([30, 255, 255])
 
         if self.debug_mode:
