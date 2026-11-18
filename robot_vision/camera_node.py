@@ -171,7 +171,7 @@ class CameraNode(Node):
 
         return distance_x, distance_y
 
-    # TODO: B 방법 오차 이유 찾기
+    # B 오차 이유: total angle이 0에 가까우면 오차 커짐 -> 기본 theta 설정으로 오차 최소화
     def compute_distance_B(self, bbox=None, point=None, roi_offset=(0, 0)):
         if (bbox is None) == (point is None):
             raise ValueError()
