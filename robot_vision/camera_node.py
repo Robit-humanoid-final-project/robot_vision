@@ -247,7 +247,15 @@ class CameraNode(Node):
                     cv_image, self.detector.w, self.detector.h
                 )
                 _, yolo_gray_img = self.detector.predict(processed_bgr)
-                mask, bboxes = self.hsv.process(processed_bgr)
+                ball_bboxes = [
+                    detection["bbox"]
+                    for detection in self.detector.detections
+                    if detection["class_id"] == 0
+                ]
+                mask, bboxes = self.hsv.process(
+                    processed_bgr,
+                    excluded_bboxes=ball_bboxes,
+                )
                 self.publish_vision_observation(bboxes)
             except (cv.error, RuntimeError, ValueError, TypeError, IndexError) as error:
                 self.get_logger().error(f"비전 처리 실패: {error}")

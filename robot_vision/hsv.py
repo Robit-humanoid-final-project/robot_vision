@@ -22,7 +22,7 @@ class HSV:
             cv.createTrackbar("S max", "HSV Tuner", self.upper_bound[1], 255, nothing)
             cv.createTrackbar("V max", "HSV Tuner", self.upper_bound[2], 255, nothing)
 
-    def process(self, padded_bgr):
+    def process(self, padded_bgr, excluded_bboxes=None):
         if self.debug_mode:
             self.lower_bound[0] = cv.getTrackbarPos("H min", "HSV Tuner")
             self.lower_bound[1] = cv.getTrackbarPos("S min", "HSV Tuner")
@@ -39,6 +39,13 @@ class HSV:
         kernel_open = np.ones((3, 3), np.uint8)
         mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel_close, iterations=1)
         mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel_open, iterations=1)
+
+        if excluded_bboxes:
+            for x1, y1, x2, y2 in excluded_bboxes:
+                center = ((x1 + x2) // 2, (y1 + y2) // 2)
+                radius = int(min(x2 - x1, y2 - y1) * 0.525)
+                if radius > 0:
+                    cv.circle(mask, center, radius, 0, thickness=-1)
 
         split_mask = mask.copy()
 
@@ -79,10 +86,10 @@ class HSV:
                                 # 해당 파인 부분이 상단인지, 하단인지
                                 top_defects = [
                                     pt for pt in valid_defects if pt[1] < y + h // 2
-                                ] 
+                                ]
                                 bottom_defects = [
                                     pt for pt in valid_defects if pt[1] >= y + h // 2
-                                ] 
+                                ]
 
                                 if top_defects:
                                     # 너비 기준 중앙에서 가까운 f를 찾음
