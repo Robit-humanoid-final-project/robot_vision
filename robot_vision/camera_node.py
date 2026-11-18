@@ -353,7 +353,6 @@ class CameraNode(Node):
 
         if position_error:
             message.status = 4
-        # ros2 topic echo /vision_packages
         elif not message.detections and not any(message.ball) and not message.obstacles:
             message.status = 1
         self.vision_pub.publish(message)
@@ -378,4 +377,3 @@ def main(args=None):
 
 if __name__ == "__main__":
     main()
-0
