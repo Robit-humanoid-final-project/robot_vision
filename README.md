@@ -29,6 +29,5 @@ ros2 launch robot_vision robot_vision.launch.py
 
 ```
 **/__pycache__/
-*.pycs
 .gitignore
 ```
