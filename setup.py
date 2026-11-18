@@ -34,6 +34,7 @@ setup(
         "console_scripts": [
             # '실행할_명령어_이름 = 패키지명.파일명:실행함수' 형태
             "camera_node = robot_vision.camera_node:main",
+            "pan_tilt_node = robot_vision.pan_tilt_node:main",
         ],
     },
 )

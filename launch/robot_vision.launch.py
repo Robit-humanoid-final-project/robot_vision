@@ -8,8 +8,8 @@ def generate_launch_description():
     camera_info_yaml_file_path = PathJoinSubstitution(
         [FindPackageShare("insta360_usb_cam"), "config", "camera_info_config.yaml"]
     )
-    object_size_yaml_file_path = PathJoinSubstitution(
-        [FindPackageShare("robot_vision"), "config", "object.yaml"]
+    vision_yaml_file_path = PathJoinSubstitution(
+        [FindPackageShare("robot_vision"), "config", "vision.yaml"]
     )
     return LaunchDescription(
         [
@@ -19,7 +19,15 @@ def generate_launch_description():
                 name="camera_node",
                 output="screen",
                 emulate_tty=True,
-                parameters=[camera_info_yaml_file_path, object_size_yaml_file_path],
+                parameters=[camera_info_yaml_file_path, vision_yaml_file_path],
+            ),
+            Node(
+                package="robot_vision",
+                executable="pan_tilt_node",
+                name="pan_tilt_node",
+                output="screen",
+                emulate_tty=True,
+                parameters=[vision_yaml_file_path],
             ),
         ]
     )
