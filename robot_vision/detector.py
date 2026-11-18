@@ -108,7 +108,7 @@ class Detector:
                 # 바운딩 박스
                 cv.rectangle(display_img, (x1, y1), (x2, y2), (255, 255, 255), 2)
 
-                label = f"ID:{class_id} ({conf:.2f})"
+                label = f"Class ID:{class_id} ({conf:.2f})"
                 cv.putText(
                     display_img,
                     label,
