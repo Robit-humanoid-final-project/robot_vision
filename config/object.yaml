@@ -9,3 +9,4 @@
       height: 0.225
 
     camera_height: 0.58
+    camera_tilt_deg: 30.0 # 아래 -> (+), 위 -> (-)

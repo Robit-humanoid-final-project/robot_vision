@@ -14,6 +14,8 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         # launch 파일 설치 설정
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
+        # parameter 설정 파일 설치 설정
+        (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
         # model 디렉터리의 best.xml, best.bin 파일 설치 설정
         (os.path.join("share", package_name, "model"), glob("model/*")),
     ],
