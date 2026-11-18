@@ -13,7 +13,7 @@ from rclpy.qos import QoSHistoryPolicy, QoSProfile
 from sensor_msgs.msg import Image
 
 from humanoid_interfaces.msg import Vision2LocalObserv, VisionDetection, VisionObstacle
-from insta360_usb_cam.msg import InstaPanTiltMsgs, PanTiltStatusMsgs
+from insta360_usb_cam.msg import PanTiltStatusMsgs
 from robot_vision.detector import Detector
 from robot_vision.hsv import HSV
 
@@ -52,7 +52,6 @@ class CameraNode(Node):
         self.K = np.array(k, dtype=np.float64).reshape(3, 3)
         self.D = np.array(d, dtype=np.float64)
         self.h = self.get_parameter("camera_height").value
-        self.camera_tilt_deg = self.get_parameter("camera_tilt_deg").value
         self.mount_tilt_deg = self.get_parameter("mount_tilt_deg").value
         self.ball_width = self.get_parameter("ball.width").value
         self.ball_height = self.get_parameter("ball.height").value
@@ -60,7 +59,9 @@ class CameraNode(Node):
         self.cone_height = self.get_parameter("cone.height").value
         self.letterbox_scale = 1.0
         self.letterbox_pad = (0, 0)
-        self.theta = math.radians(-self.camera_tilt_deg + self.mount_tilt_deg)
+        self.theta = math.radians(
+            -self.get_parameter("camera_tilt_deg").value + self.mount_tilt_deg
+        )
 
         self.bridge = CvBridge()
         # OpenVINO 추론 model
@@ -91,15 +92,6 @@ class CameraNode(Node):
             self.pan_tilt_callback,
             camera_qos,
         )
-        self.pan_tilt_publisher = self.create_publisher(
-            InstaPanTiltMsgs,
-            "/camera1/pan_tilt",
-            10,
-        )
-        self.pan_tilt_timer = self.create_timer(
-            0.2,
-            self.publish_pan_tilt_command,
-        )
         self.vision_pub = self.create_publisher(
             Vision2LocalObserv, "/vision_packages", 10
         )
@@ -129,12 +121,6 @@ class CameraNode(Node):
         if display_img is not None:
             cv.imshow("Robot Vision", display_img)
             cv.waitKey(1)
-
-    def publish_pan_tilt_command(self):
-        message = InstaPanTiltMsgs()
-        message.pan = 0
-        message.tilt = round(-self.camera_tilt_deg * 3600.0)
-        self.pan_tilt_publisher.publish(message)
 
     def publish_status(self, status):
         message = Vision2LocalObserv()
