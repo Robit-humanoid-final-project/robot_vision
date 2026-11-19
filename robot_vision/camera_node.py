@@ -1,10 +1,8 @@
-import math
 import os
 import threading
 import time
 
 import cv2 as cv
-import numpy as np
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge, CvBridgeError
@@ -12,10 +10,13 @@ from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile
 from sensor_msgs.msg import Image
 
-from humanoid_interfaces.msg import Vision2LocalObserv, VisionDetection, VisionObstacle
+from humanoid_interfaces.msg import Vision2LocalObserv
 from insta360_usb_cam.msg import PanTiltStatusMsgs
 from robot_vision.detector import Detector
+from robot_vision.distance_estimator import DistanceEstimator
 from robot_vision.hsv import HSV
+from robot_vision.vision_message_builder import VisionMessageBuilder
+from robot_vision.vision_pipeline import VisionPipeline
 
 
 class CameraNode(Node):
@@ -45,29 +46,26 @@ class CameraNode(Node):
         self.declare_parameter("cone.height", 0.225)  # //
         k = self.get_parameter("camera_matrix.data").value
         d = self.get_parameter("distortion_coefficients.data").value
-        self.fx = k[0]
-        self.cx = k[2]
-        self.fy = k[4]
-        self.cy = k[5]
-        self.K = np.array(k, dtype=np.float64).reshape(3, 3)
-        self.D = np.array(d, dtype=np.float64)
-        self.h = self.get_parameter("camera_height").value
-        self.mount_tilt_deg = self.get_parameter("mount_tilt_deg").value
-        self.ball_width = self.get_parameter("ball.width").value
-        self.ball_height = self.get_parameter("ball.height").value
-        self.cone_width = self.get_parameter("cone.width").value
-        self.cone_height = self.get_parameter("cone.height").value
-        self.letterbox_scale = 1.0
-        self.letterbox_pad = (0, 0)
-        self.theta = math.radians(
-            -self.get_parameter("camera_tilt_deg").value + self.mount_tilt_deg
+        self.distance_estimator = DistanceEstimator(
+            camera_matrix=k,
+            distortion_coefficients=d,
+            camera_height=self.get_parameter("camera_height").value,
+            mount_tilt_deg=self.get_parameter("mount_tilt_deg").value,
+            ball_width=self.get_parameter("ball.width").value,
+            ball_height=self.get_parameter("ball.height").value,
+            cone_width=self.get_parameter("cone.width").value,
+            cone_height=self.get_parameter("cone.height").value,
         )
+        self.tilt_lock = threading.Lock()
+        self.tilt_deg = self.get_parameter("camera_tilt_deg").value
 
         self.bridge = CvBridge()
         # OpenVINO 추론 model
-        self.detector = Detector(model_path=model_path, device_name=device_name)
-        # HSV
-        self.hsv = HSV()
+        self.pipeline = VisionPipeline(
+            Detector(model_path=model_path, device_name=device_name),
+            HSV(),
+        )
+        self.message_builder = VisionMessageBuilder(self.distance_estimator)
         # worker 구조 (연산 중일 때 프레임 드랍, 실시간성 유지)
         self.latest_frame = None
         self.latest_display = None
@@ -111,7 +109,8 @@ class CameraNode(Node):
 
     def pan_tilt_callback(self, msg: PanTiltStatusMsgs):
         tilt_deg = msg.tilt / 3600.0
-        self.theta = math.radians(-tilt_deg + self.mount_tilt_deg)
+        with self.tilt_lock:
+            self.tilt_deg = tilt_deg
 
     def display_timer_callback(self):
         with self.frame_lock:
@@ -129,104 +128,6 @@ class CameraNode(Node):
         message.status = status
         self.vision_pub.publish(message)
 
-    def _undistort_points(self, points):
-        pts = np.array(points, dtype=np.float64).reshape(-1, 1, 2)
-        undist = cv.undistortPoints(pts, self.K, self.D, P=self.K)
-        return undist.reshape(-1, 2)
-
-    def compute_distance_A(self, bbox, width, height=None, roi_offset=(0, 0)):
-        x1, y1, x2, y2 = bbox
-        offset_x, offset_y = roi_offset
-        pad_x, pad_y = self.letterbox_pad
-
-        x1_orig = (x1 + offset_x - pad_x) / self.letterbox_scale
-        y1_orig = (y1 + offset_y - pad_y) / self.letterbox_scale
-        x2_orig = (x2 + offset_x - pad_x) / self.letterbox_scale
-        y2_orig = (y2 + offset_y - pad_y) / self.letterbox_scale
-
-        (ux1, uy1), (ux2, uy2) = self._undistort_points(
-            [(x1_orig, y1_orig), (x2_orig, y2_orig)]
-        )
-        u = (ux1 + ux2) / 2.0
-        v = (uy1 + uy2) / 2.0
-        w_orig = ux2 - ux1
-        h_orig = uy2 - uy1
-
-        if w_orig <= 1e-6 or (height is not None and h_orig <= 1e-6):
-            return None, None
-
-        z_x = (self.fx * width) / w_orig
-        if height is not None:
-            z_y = (self.fy * height) / h_orig
-            z_cam = 0.5 * (z_x + z_y)
-        else:
-            z_cam = z_x
-
-        y_n = (v - self.cy) / self.fy
-        alpha = math.atan(y_n)
-        total_angle = self.theta + alpha
-
-        distance_x = z_cam * (math.cos(total_angle) / math.cos(alpha))
-        distance_y = z_cam * ((self.cx - u) / self.fx)
-
-        return distance_x, distance_y
-
-    # B 오차 이유: total angle이 0에 가까우면 오차 커짐 -> 기본 theta 설정으로 오차 최소화
-    def compute_distance_B(self, bbox=None, point=None, roi_offset=(0, 0)):
-        if (bbox is None) == (point is None):
-            raise ValueError()
-
-        offset_x, offset_y = roi_offset
-
-        if point is not None:
-            u = float(point[0]) + offset_x
-            v = float(point[1]) + offset_y
-        else:
-            x1, y1, x2, y2 = bbox
-            # 장애물, 공, 골대는 bbox 최하단 중앙 픽셀 사용
-            u = ((x1 + x2) / 2.0) + offset_x
-            v = float(y2) + offset_y
-
-        # 640x480 좌표
-        pad_x, pad_y = self.letterbox_pad
-        u = (u - pad_x) / self.letterbox_scale
-        v = (v - pad_y) / self.letterbox_scale
-
-        (u, v) = self._undistort_points([(u, v)])[0]
-
-        # 정규화 좌표(y_n) 및 수직 각도 계산
-        y_n = (v - self.cy) / self.fy
-        alpha = math.atan(y_n)
-        total_angle = self.theta + alpha
-
-        # 분모 0 방지
-        if total_angle <= 1e-6:
-            return None, None
-
-        distance_x = self.h / math.tan(total_angle)
-        distance_y = distance_x * ((self.cx - u) / self.fx)
-
-        return distance_x, distance_y
-
-    def letterbox_resize(self, img, target_w=640, target_h=640):
-        orig_h, orig_w = img.shape[:2]
-        scale = min(target_w / orig_w, target_h / orig_h)
-        new_w, new_h = int(orig_w * scale), int(orig_h * scale)
-
-        resized = cv.resize(img, (new_w, new_h), interpolation=cv.INTER_LINEAR)
-        top = (target_h - new_h) // 2
-        bottom = target_h - new_h - top
-        left = (target_w - new_w) // 2
-        right = target_w - new_w - left
-        self.letterbox_scale = scale
-        self.letterbox_pad = (left, top)
-
-        # padding
-        padded = cv.copyMakeBorder(
-            resized, top, bottom, left, right, cv.BORDER_CONSTANT, value=(0, 0, 0)
-        )
-        return padded
-
     def process_latest_frame(self):
         while not self.stop_event.is_set():
             if not self.frame_event.wait(timeout=0.1):
@@ -243,29 +144,26 @@ class CameraNode(Node):
             start_time = time.perf_counter()
 
             try:
-                processed_bgr = self.letterbox_resize(
-                    cv_image, self.detector.w, self.detector.h
+                with self.tilt_lock:
+                    tilt_deg = self.tilt_deg
+                result = self.pipeline.process(cv_image)
+                distance_context = self.distance_estimator.create_context(
+                    tilt_deg=tilt_deg,
+                    letterbox_scale=result.letterbox_scale,
+                    letterbox_pad=result.letterbox_pad,
                 )
-                _, yolo_gray_img = self.detector.predict(processed_bgr)
-                ball_bboxes = [
-                    detection["bbox"]
-                    for detection in self.detector.detections
-                    if detection["class_id"] == 0
-                ]
-                mask, bboxes = self.hsv.process(
-                    processed_bgr,
-                    excluded_bboxes=ball_bboxes,
-                )
-                self.publish_vision_observation(bboxes)
+                message = self.message_builder.build(result, distance_context)
+                message.header.stamp = self.get_clock().now().to_msg()
+                self.vision_pub.publish(message)
             except (cv.error, RuntimeError, ValueError, TypeError, IndexError) as error:
                 self.get_logger().error(f"비전 처리 실패: {error}")
                 self.publish_status(3)
                 continue
 
-            final_display = cv.cvtColor(yolo_gray_img, cv.COLOR_GRAY2BGR)
-            cv.copyTo(processed_bgr, mask, final_display)
+            final_display = cv.cvtColor(result.display_image, cv.COLOR_GRAY2BGR)
+            cv.copyTo(result.processed_image, result.mask, final_display)
 
-            for x, y, w, h, obs_id in bboxes:
+            for x, y, w, h, obs_id in result.obstacle_bboxes:
                 cv.rectangle(final_display, (x, y), (x + w, y + h), (0, 0, 255), 2)
                 cv.putText(
                     final_display,
@@ -284,87 +182,6 @@ class CameraNode(Node):
             fps = 1000 / latency_ms if latency_ms > 0 else 0.0
 
             # print(f"total={latency_ms:.1f}ms, fps={fps:.1f}")
-
-    def publish_vision_observation(self, obstacle_bboxes):
-        message = Vision2LocalObserv()
-        message.header.stamp = self.get_clock().now().to_msg()
-        message.header.frame_id = "camera"
-        message.status = 0
-
-        position_error = False
-        detection_id = 0
-        for detection in self.detector.detections:
-            class_id = detection["class_id"]
-            confidence = detection["confidence"]
-            detection_id += 1
-
-            if class_id == 0:
-                distance = self.compute_distance_A(
-                    bbox=detection["bbox"],
-                    width=self.ball_width,
-                    # height=self.ball_height,
-                )
-                if distance[0] is not None:
-                    message.ball = [
-                        float(distance[0]),
-                        float(distance[1]),
-                        confidence,
-                    ]
-                    # print(
-                    #     f"Ball_A: x={distance_a[0]:.3f} m, "
-                    #     f"y={distance_a[1]:.3f} m, confidence={confidence:.3f}"
-                    # )
-                else:
-                    position_error = True
-            elif class_id == 5:
-                distance = self.compute_distance_B(bbox=detection["bbox"])
-                if distance[0] is None:
-                    position_error = True
-                    continue
-                detection_message = VisionDetection()
-                detection_message.type = 3
-                detection_message.detection_id = detection_id
-                detection_message.x = float(distance[0])
-                detection_message.y = float(distance[1])
-                detection_message.confidence = confidence
-                message.detections.append(detection_message)
-
-        for intersection in self.detector.intersections:
-            distance = self.compute_distance_B(point=intersection["point"])
-            if distance[0] is None:
-                position_error = True
-                continue
-            detection_id += 1
-            detection_message = VisionDetection()
-            detection_message.type = intersection["class_id"] - 2
-            detection_message.detection_id = detection_id
-            detection_message.x = float(distance[0])
-            detection_message.y = float(distance[1])
-            detection_message.confidence = intersection["confidence"]
-            message.detections.append(detection_message)
-
-        for x, y, width, height, obstacle_id in obstacle_bboxes:
-            distance = self.compute_distance_A(
-                bbox=(x, y, x + width, y + height),
-                width=self.cone_width,
-                height=self.cone_height,
-            )
-            if distance[0] is None:
-                position_error = True
-                continue
-            obstacle = VisionObstacle()
-            obstacle.detection_id = obstacle_id
-            obstacle.x = float(distance[0])
-            obstacle.y = float(distance[1])
-            obstacle.confidence = 1.0
-            message.obstacles.append(obstacle)
-
-        if position_error:
-            message.status = 4
-        elif not message.detections and not any(message.ball) and not message.obstacles:
-            message.status = 1
-        self.vision_pub.publish(message)
-        # ros2 topic echo /vision_packages
 
 
 def main(args=None):
