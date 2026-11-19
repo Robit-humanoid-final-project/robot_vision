@@ -22,6 +22,7 @@ class VisionMessageBuilder:
                     bbox=detection["bbox"],
                     width=self.distance_estimator.ball_width,
                     context=distance_context,
+                    # height=self.distance_estimator.ball_height,
                 )
                 if distance[0] is not None:
                     message.ball = [
@@ -86,4 +87,5 @@ class VisionMessageBuilder:
         elif not message.detections and not any(message.ball) and not message.obstacles:
             message.status = 1
 
+        # ros2 topic echo /vision_packages
         return message

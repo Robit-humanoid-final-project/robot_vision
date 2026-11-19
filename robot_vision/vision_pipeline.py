@@ -31,6 +31,7 @@ class VisionPipeline:
         bottom = target_h - new_h - top
         left = (target_w - new_w) // 2
         right = target_w - new_w - left
+        # padding
         padded = cv.copyMakeBorder(
             resized, top, bottom, left, right, cv.BORDER_CONSTANT, value=(0, 0, 0)
         )

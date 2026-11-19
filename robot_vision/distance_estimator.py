@@ -88,6 +88,7 @@ class DistanceEstimator:
 
         return distance_x, distance_y
 
+    # B 오차 이유: total angle이 0에 가까우면 오차 커짐 -> 기본 theta 설정으로 오차 최소화
     def compute_distance_B(
         self, context, bbox=None, point=None, roi_offset=(0, 0)
     ):
@@ -100,15 +101,18 @@ class DistanceEstimator:
             v = float(point[1]) + offset_y
         else:
             x1, y1, x2, y2 = bbox
+            # 장애물, 공, 골대는 bbox 최하단 중앙 픽셀 사용
             u = ((x1 + x2) / 2.0) + offset_x
             v = float(y2) + offset_y
 
+        # 640x480 좌표
         pad_x, pad_y = context.letterbox_pad
         u = (u - pad_x) / context.letterbox_scale
         v = (v - pad_y) / context.letterbox_scale
 
         (u, v) = self._undistort_points([(u, v)])[0]
 
+        # 정규화 좌표(y_n) 및 수직 각도 계산
         y_n = (v - self.cy) / self.fy
         alpha = math.atan(y_n)
         total_angle = context.theta + alpha
