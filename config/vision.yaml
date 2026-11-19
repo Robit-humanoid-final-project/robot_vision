@@ -1,8 +1,8 @@
 /**:
   ros__parameters:
     ball:
-      width: 0.130
-      height: 0.130
+      width: 0.155 # ball size: 0.130 + bbox padding 0.025
+      height: 0.155
 
     cone: # 꼬깔
       width: 0.140
