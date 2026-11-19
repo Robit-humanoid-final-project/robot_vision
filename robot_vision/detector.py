@@ -28,7 +28,7 @@ class Detector:
             5: "Goalpost",
         }
 
-        self.conf_thresholds = {0: 0.57, 1: 0.65, 2: 0.35, 3: 0.50, 4: 0.45, 5: 0.99}
+        self.conf_thresholds = {0: 0.57, 1: 0.65, 2: 0.30, 3: 0.40, 4: 0.45, 5: 0.99}
         self.detections = []
         self.intersections = []
 
