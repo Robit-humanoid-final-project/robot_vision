@@ -86,7 +86,10 @@ class Detector:
                     # if intersection is not None:
                     #     local_x, local_y = intersection
                     #     point = (x1 + local_x, y1 + local_y)
-                    point = ((x1 + x2) // 2, (y1 + y2) // 2)
+                    if class_id == 3:
+                        point = ((x1 + x2) // 2, y1)
+                    else:
+                        point = ((x1 + x2) // 2, (y1 + y2) // 2)
                     self.intersections.append(
                         {
                             "class_id": class_id,
