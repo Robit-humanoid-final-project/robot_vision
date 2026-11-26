@@ -10,7 +10,7 @@ class HSV:
     def __init__(self, debug_mode=False):
         self.debug_mode = debug_mode
         self.lower_bound = np.array([2, 160, 150])
-        self.upper_bound = np.array([20, 255, 255])
+        self.upper_bound = np.array([22, 255, 255])
         # TODO: yellow, h 23~30 골대 추가(green)
 
         if self.debug_mode:
