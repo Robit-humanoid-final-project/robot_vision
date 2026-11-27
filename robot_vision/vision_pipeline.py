@@ -12,6 +12,7 @@ class VisionResult:
     detections: list
     intersections: list
     obstacle_bboxes: list
+    goalpost_bboxes: list
     letterbox_scale: float
     letterbox_pad: tuple
 
@@ -47,7 +48,7 @@ class VisionPipeline:
             for detection in self.detector.detections
             if detection["class_id"] == 0
         ]
-        mask, obstacle_bboxes = self.hsv.process(
+        mask, obstacle_bboxes, goalpost_bboxes = self.hsv.process(
             processed_image,
             excluded_bboxes=ball_bboxes,
         )
@@ -59,6 +60,7 @@ class VisionPipeline:
             detections=self.detector.detections,
             intersections=self.detector.intersections,
             obstacle_bboxes=obstacle_bboxes,
+            goalpost_bboxes=goalpost_bboxes,
             letterbox_scale=scale,
             letterbox_pad=pad,
         )

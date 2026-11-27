@@ -175,6 +175,18 @@ class CameraNode(Node):
                     2,
                 )
 
+            for x, y, w, h in result.goalpost_bboxes:
+                cv.rectangle(final_display, (x, y), (x + w, y + h), (0, 255, 255), 2)
+                cv.putText(
+                    final_display,
+                    "Goalpost(L)",
+                    (x, y - 5),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    2,
+                )
+
             with self.frame_lock:
                 self.latest_display = final_display
 

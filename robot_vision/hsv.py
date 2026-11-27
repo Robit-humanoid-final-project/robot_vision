@@ -11,7 +11,6 @@ class HSV:
         self.debug_mode = debug_mode
         self.lower_bound = np.array([2, 160, 150])
         self.upper_bound = np.array([22, 255, 255])
-        # TODO: yellow, h 23~30 골대 추가(green)
 
         if self.debug_mode:
             cv.namedWindow("HSV Tuner", cv.WINDOW_NORMAL)
@@ -34,12 +33,16 @@ class HSV:
 
         hsv = cv.cvtColor(padded_bgr, cv.COLOR_BGR2HSV)
         mask = cv.inRange(hsv, self.lower_bound, self.upper_bound)
+        goalpost_lower = np.array([23, self.lower_bound[1], self.lower_bound[2]])
+        goalpost_upper = np.array([30, self.upper_bound[1], self.upper_bound[2]])
+        goalpost_mask = cv.inRange(hsv, goalpost_lower, goalpost_upper)
 
         # 노이즈 제거
         kernel_close = np.ones((5, 5), np.uint8)
         kernel_open = np.ones((3, 3), np.uint8)
-        mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, kernel_close, iterations=1)
-        mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel_open, iterations=1)
+        for color_mask in (mask, goalpost_mask):
+            cv.morphologyEx(color_mask, cv.MORPH_CLOSE, kernel_close, dst=color_mask)
+            cv.morphologyEx(color_mask, cv.MORPH_OPEN, kernel_open, dst=color_mask)
 
         if excluded_bboxes:
             for x1, y1, x2, y2 in excluded_bboxes:
@@ -47,6 +50,7 @@ class HSV:
                 radius = int(min(x2 - x1, y2 - y1) * 0.525)
                 if radius > 0:
                     cv.circle(mask, center, radius, 0, thickness=-1)
+                    cv.circle(goalpost_mask, center, radius, 0, thickness=-1)
 
         split_mask = mask.copy()
 
@@ -158,4 +162,14 @@ class HSV:
                 bboxes.append((x, y, w, h, obs_id))
                 obs_id += 1
 
-        return split_mask, bboxes
+        goalpost_contours, _ = cv.findContours(
+            goalpost_mask.copy(), cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE
+        )
+        goalpost_bboxes = []
+        for c in goalpost_contours:
+            x, y, w, h = cv.boundingRect(c)
+            if w < 7 or h < 10 or h <= w or cv.contourArea(c) < 50:
+                continue
+            goalpost_bboxes.append((x, y, w, h))
+
+        return split_mask, bboxes, goalpost_bboxes

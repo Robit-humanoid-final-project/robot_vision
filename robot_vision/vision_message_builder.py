@@ -32,21 +32,21 @@ class VisionMessageBuilder:
                     ]
                 else:
                     position_error = True
-            elif class_id == 5:
-                distance = self.distance_estimator.compute_distance_B(
-                    bbox=detection["bbox"],
-                    context=distance_context,
-                )
-                if distance[0] is None:
-                    position_error = True
-                    continue
-                detection_message = VisionDetection()
-                detection_message.type = 3
-                detection_message.detection_id = detection_id
-                detection_message.x = float(distance[0])
-                detection_message.y = float(distance[1])
-                detection_message.confidence = confidence
-                message.detections.append(detection_message)
+            # elif class_id == 5:
+            #     distance = self.distance_estimator.compute_distance_A(
+            #         bbox=detection["bbox"],
+            #         context=distance_context,
+            #     )
+            #     if distance[0] is None:
+            #         position_error = True
+            #         continue
+            #     detection_message = VisionDetection()
+            #     detection_message.type = 3
+            #     detection_message.detection_id = detection_id
+            #     detection_message.x = float(distance[0])
+            #     detection_message.y = float(distance[1])
+            #     detection_message.confidence = confidence
+            #     message.detections.append(detection_message)
 
         for intersection in result.intersections:
             distance = self.distance_estimator.compute_distance_B(
@@ -63,6 +63,25 @@ class VisionMessageBuilder:
             detection_message.x = float(distance[0])
             detection_message.y = float(distance[1])
             detection_message.confidence = intersection["confidence"]
+            message.detections.append(detection_message)
+
+        for x, y, width, height in result.goalpost_bboxes:
+            distance = self.distance_estimator.compute_distance_A(
+                bbox=(x, y, x + width, y + height),
+                width=self.distance_estimator.cone_width,
+                height=self.distance_estimator.cone_height,
+                context=distance_context,
+            )
+            if distance[0] is None:
+                position_error = True
+                continue
+            detection_id += 1
+            detection_message = VisionDetection()
+            detection_message.type = 3
+            detection_message.detection_id = detection_id
+            detection_message.x = float(distance[0])
+            detection_message.y = float(distance[1])
+            detection_message.confidence = 1.0
             message.detections.append(detection_message)
 
         for x, y, width, height, obstacle_id in result.obstacle_bboxes:
